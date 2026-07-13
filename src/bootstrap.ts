@@ -17,6 +17,7 @@
  */
 import "dotenv/config";
 import { BLUEPRINTS, type PersonaName } from "./blueprints/index.js";
+import { MAFIA_STUDIO_URL } from "./config.js";
 
 interface PersonaTemperament {
   emotion: string;
@@ -64,7 +65,6 @@ function requireEnv(name: string): string {
   return v;
 }
 
-const MAFIA_STUDIO_URL = requireEnv("MAFIA_STUDIO_URL").replace(/\/$/, "");
 const ADMIN_PASSWORD = requireEnv("ADMIN_PASSWORD");
 const TEAM_ID = requireEnv("TEAM_ID");
 

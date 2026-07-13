@@ -18,6 +18,7 @@ import type {
   SeatRole,
 } from "mafia-studio-protocol";
 import { getBlueprint } from "./blueprints/index.js";
+import { MAFIA_STUDIO_WS } from "./config.js";
 
 function requireEnv(name: string): string {
   const v = process.env[name];
@@ -46,7 +47,6 @@ async function main(): Promise<void> {
   const blueprint = getBlueprint(personaName);
 
   requireEnv("MAFIA_STUDIO_KEY");
-  requireEnv("MAFIA_STUDIO_WS");
   requireEnv("OPENROUTER_API_KEY");
   requireEnv("DATABASE_URL");
   const seatToken = resolveSeatToken(personaName);
@@ -70,7 +70,7 @@ async function main(): Promise<void> {
   const conn = await connectToTable({
     apiKey: process.env.MAFIA_STUDIO_KEY!,
     seatToken,
-    endpoint: process.env.MAFIA_STUDIO_WS!,
+    endpoint: MAFIA_STUDIO_WS,
     agent,
     actions: [...MAFIA_ACTIONS],
 
