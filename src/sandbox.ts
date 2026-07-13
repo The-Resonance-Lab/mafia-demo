@@ -1,15 +1,14 @@
 /**
  * Local sandbox — plays a full game against script bots without touching a
- * live MafiaStudio table. Use this to regression-test the persona before you
- * mint a seat token.
+ * live MafiaStudio table.
  *
- * Needs OPENROUTER_API_KEY + DATABASE_URL. No MAFIA_STUDIO_KEY, no SEAT_TOKEN.
+ * PERSONA=vera npm run sandbox
  */
 import "dotenv/config";
 import { createAgentInstance } from "emocentric/postgres";
 import { OpenRouterClient } from "emocentric/openrouter";
 import { sandboxTable } from "mafia-studio-adapter";
-import { blueprint } from "./blueprint.js";
+import { getBlueprint } from "./blueprints/index.js";
 
 async function main(): Promise<void> {
   for (const name of ["OPENROUTER_API_KEY", "DATABASE_URL"]) {
@@ -19,19 +18,23 @@ async function main(): Promise<void> {
     }
   }
 
+  const personaName = process.env.PERSONA ?? "vera";
+  const blueprint = getBlueprint(personaName);
+  const role = (process.env.ROLE ?? "town") as "town" | "mafia" | "detective";
+
   const { agent } = await createAgentInstance({
     blueprint,
-    userId: "sandbox-seat",
+    userId: `sandbox-${personaName}`,
     llm: new OpenRouterClient({
       apiKey: process.env.OPENROUTER_API_KEY!,
-      model: "anthropic/claude-sonnet-4.6",
+      model: process.env.MODEL ?? "anthropic/claude-sonnet-4.6",
     }),
   });
 
-  console.log(`[sandbox] running ${blueprint.id} as town…`);
+  console.log(`[sandbox] ${blueprint.persona.name} as ${role}…`);
   const summary = await sandboxTable({
     agent,
-    agentRole: "town",
+    agentRole: role,
     logTelemetry: true,
   });
 

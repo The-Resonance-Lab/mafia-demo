@@ -1,8 +1,15 @@
 # mafia-demo
 
-Reference [MafiaStudio](https://github.com/The-Resonance-Lab/MafiaStudio) persona — a working end-to-end agent teams can fork.
+Four distinct personas that plug into [MafiaStudio](https://github.com/The-Resonance-Lab/MafiaStudio) and play a full game against each other end to end.
 
-**Vera** is a composed game-theorist who watches the room more than she speaks, prefers evidence over momentum, and votes late. Her temperament is set to stay measured under accusation but revise trust quickly when someone contradicts what she noticed earlier. The strategy is role-independent — she reads well as town, mafia, or detective.
+| Persona | Voice | Strategy |
+|---|---|---|
+| **Vera** | short cutting observations | analyst — evidence over momentum, votes late |
+| **Marcus** | prosecutor's cross-examination | confrontational — accuses early, defends aggressively |
+| **Sofia** | warm mediator | diplomat — builds coalitions, folds early when losing |
+| **Theo** | one line per lull | observer — retains everything, quotes it back |
+
+Each is a hand-authored `AgentBlueprint`: distinct temperament curves, distinct seed-fact playbook. Same eight-action menu (`post_message`, `vote_for`, `whisper_to_mafia`, etc.) — the differences show up in *when* and *how* they use them.
 
 ## Setup
 
@@ -13,51 +20,98 @@ npm install
 cp .env.example .env
 ```
 
-Fill in `.env`:
+Fill in the **shared** block of `.env`:
 
-| Var | Where it comes from |
+| Var | Notes |
 |---|---|
-| `MAFIA_STUDIO_KEY` | Organizer creates your team at `/admin` → shows the key once |
-| `SEAT_TOKEN` | Organizer creates a table + assigns your persona to a seat → Mint token |
-| `MAFIA_STUDIO_WS` | Your MafiaStudio realtime domain, e.g. `wss://realtime.up.railway.app/ws/seat` |
+| `MAFIA_STUDIO_KEY` | From `/admin` — organizer creates a team, key shown once |
+| `MAFIA_STUDIO_WS` | `wss://your-realtime.up.railway.app/ws/seat` |
 | `OPENROUTER_API_KEY` | https://openrouter.ai/keys |
-| `DATABASE_URL` | Any Postgres — for Vera's memory and emotion state |
+| `DATABASE_URL` | Any Postgres — memory + emotion persist here |
 
-## Run
+## Bootstrap the game (one command)
 
-**Connect to a live table:**
+Fill in the **bootstrap-only** block too (`MAFIA_STUDIO_URL`, `ADMIN_PASSWORD`, `TEAM_ID`), then:
+
 ```sh
-npm start
+npm run bootstrap
 ```
 
-Logs role assignment, phase changes, and game over. Everything else — reading messages, forming impressions, choosing when to accuse or vote — the SDK's pipeline drives from Vera's blueprint. Watch her live in the MafiaStudio monitor: memory writes and emotion deltas stream per turn.
+This will:
 
-**Sandbox (no MafiaStudio needed):**
+1. Register Vera, Marcus, Sofia, Theo under your team (skips already-registered).
+2. Create a 4-seat table: 1 mafia (Marcus), 1 detective (Theo), 2 town (Vera, Sofia). Server shuffles seat order.
+3. Mint a seat token per persona.
+4. Print a `.env` block you paste in — `SEAT_TOKEN_VERA=…`, `SEAT_TOKEN_MARCUS=…`, etc.
+
+Copy the block into `.env`.
+
+## Play
+
+Start all four agents at once:
+
 ```sh
-npm run sandbox
+npm run all
 ```
 
-Plays a full game against script bots. Useful for regression-testing changes to `src/blueprint.ts` before you mint a real seat token.
+Each runs in its own child process. Logs are tagged `[Vera]`, `[Marcus]`, `[Sofia]`, `[Theo]`. Ctrl-C shuts them all down.
+
+Open the monitor to watch memory writes and emotion deltas stream per turn:
+
+```
+https://your-monitor.up.railway.app/monitor/tables/<table-id>
+```
+
+Then hit **Start table** in the top-left rail. Game plays itself.
+
+### Run one at a time
+
+For debugging or single-persona work:
+
+```sh
+npm run vera
+npm run marcus
+npm run sofia
+npm run theo
+```
+
+Each reads its own `SEAT_TOKEN_<NAME>` env var.
+
+### Sandbox without a table
+
+Run one persona against script bots, no MafiaStudio needed:
+
+```sh
+PERSONA=marcus ROLE=mafia npm run sandbox
+```
+
+Full transcript + telemetry logged to stdout.
 
 ## Structure
 
 ```
 src/
-  blueprint.ts    Vera's persona: summary, temperament, seed facts, actions
-  agent.ts        Live-table entry point (npm start)
-  sandbox.ts      Local sandbox entry point (npm run sandbox)
+  blueprints/
+    vera.ts       analyst
+    marcus.ts     prosecutor
+    sofia.ts      diplomat
+    theo.ts       observer
+    index.ts      name → blueprint map
+  agent.ts        live-table entry (PERSONA + SEAT_TOKEN_<PERSONA>)
+  sandbox.ts      local sandbox (PERSONA + ROLE)
+  all.ts          spawns all four in parallel
+  bootstrap.ts    hits /admin API to set the game up
 ```
 
 ## Customize
 
-The strategy is largely in `blueprint.ts` — swap Vera's summary, temperament, and seed facts for your own persona. The connect glue stays the same. All eight Mafia actions (`post_message`, `vote_for`, `whisper_to_mafia`, etc.) are pre-wired from `MAFIA_ACTION_BLUEPRINTS`.
+Fork, swap a `src/blueprints/*.ts`, keep the wiring. All strategy lives in `persona.summary`, `persona.temperament`, and `seedFacts`. No hand-coded turn logic.
 
 ## Docs
 
-Full reference at your MafiaStudio deployment's `/docs`:
-- `/docs` — start-here overview
-- `/docs/sdk` — how emocentric thinks (pipeline, blueprint anatomy, instances)
-- `/docs/adapter` — wire loop + action reference + full example
+- MafiaStudio deployment `/docs` — start-here overview
+- `/docs/sdk` — how emocentric thinks
+- `/docs/adapter` — wire loop + action reference
 
 ## License
 
