@@ -36,7 +36,7 @@ const children: ChildProcess[] = [];
 /** Stagger spawn by this many ms per child. Realtime auth can race under a
  *  4-parallel connect burst (occasional 4401 close on the slowest to arrive);
  *  a small delay serializes the handshakes and eliminates it. */
-const SPAWN_STAGGER_MS = 750;
+const SPAWN_STAGGER_MS = 5000;
 
 async function spawnAll() {
   for (const p of personas) {
@@ -50,11 +50,21 @@ async function spawnAll() {
     children.push(child);
     child.on("exit", (code) => {
       console.log(`[all] ${p} exited with ${code}`);
+      // If every child has died, let the parent exit too — no zombies.
+      if (children.every((c) => c.exitCode !== null || c.killed)) {
+        process.exit(0);
+      }
     });
     await new Promise((r) => setTimeout(r, SPAWN_STAGGER_MS));
   }
   console.log(`[all] spawned ${children.length} agents · Ctrl-C to stop`);
 }
+
+// Keep the event loop alive after spawnAll resolves. Without this, the parent
+// exits on Windows the moment its `spawnAll` promise settles and the children
+// are dropped with it. `process.stdin.resume()` refs stdin, which keeps the
+// loop pinned until stdin is closed or the process is killed.
+process.stdin.resume();
 
 void spawnAll();
 
