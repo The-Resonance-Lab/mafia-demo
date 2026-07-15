@@ -56,7 +56,9 @@ async function main(): Promise<void> {
 
   const { agent, close: closeAgent } = await createAgentInstance({
     blueprint,
-    userId: `seat-${personaName}`,
+    // 0.2.0 renamed userId → instanceId. Per-seat scoping preserves memory +
+    // emotion across reconnects; a fresh id would birth a new instance.
+    instanceId: `seat-${personaName}`,
     llm: new OpenRouterClient({
       apiKey: process.env.OPENROUTER_API_KEY!,
       model: process.env.MODEL ?? "anthropic/claude-sonnet-4.6",

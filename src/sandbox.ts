@@ -24,7 +24,7 @@ async function main(): Promise<void> {
 
   const { agent } = await createAgentInstance({
     blueprint,
-    userId: `sandbox-${personaName}`,
+    instanceId: `sandbox-${personaName}`,
     llm: new OpenRouterClient({
       apiKey: process.env.OPENROUTER_API_KEY!,
       model: process.env.MODEL ?? "anthropic/claude-sonnet-4.6",
