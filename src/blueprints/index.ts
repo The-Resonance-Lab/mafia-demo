@@ -13,7 +13,7 @@ import { elie } from "./elie.js";
  * API surface. `emocentric`'s `AgentBlueprint` type is the single source of
  * truth for what's valid.
  */
-export const BLUEPRINTS = { sana, kai, nadya, elie } as const;
+export const BLUEPRINTS = { kai, sana, nadya, elie } as const;
 export type PersonaName = keyof typeof BLUEPRINTS;
 
 export function getBlueprint(name: string): AgentBlueprint {
