@@ -5,13 +5,19 @@
  *   → picks src/blueprints/vera.ts
  *   → reads SEAT_TOKEN_VERA (or SEAT_TOKEN if not set)
  *
- * The SDK's heartbeat drives every turn decision. This file only wires
- * credentials + logging.
+ * Uses adapter Path B (blueprint + llm + overrides). The adapter composes
+ * the Agent internally with Mafia-tuned defaults — MafiaAwareInterpreter,
+ * AntiCascadeAppraiser, ForceVoteProcessor, MafiaMemoryFormat — so personas
+ * get better game-aware reasoning for free.
  */
 import "dotenv/config";
-import { createAgentInstance } from "emocentric/postgres";
 import { OpenRouterClient } from "emocentric/openrouter";
-import { connectToTable, MAFIA_ACTIONS } from "mafia-studio-adapter";
+import type { ActionExecutor } from "emocentric";
+import {
+  connectToTable,
+  MAFIA_ACTIONS,
+  MAFIA_ACTION_BLUEPRINTS,
+} from "mafia-studio-adapter";
 import type {
   PhaseChangeData,
   RoomWelcomeData,
@@ -29,9 +35,6 @@ function requireEnv(name: string): string {
   return v;
 }
 
-/** Resolve the seat token for this persona: prefer SEAT_TOKEN_<PERSONA>, fall
- *  back to SEAT_TOKEN. Lets you either run one persona (single .env var) or
- *  four in parallel (per-persona vars). */
 function resolveSeatToken(personaName: string): string {
   const key = `SEAT_TOKEN_${personaName.toUpperCase()}`;
   const specific = process.env[key];
@@ -42,38 +45,43 @@ function resolveSeatToken(personaName: string): string {
   process.exit(1);
 }
 
+// MafiaStudio's realtime server enacts every chosen action itself; the
+// persona-side executors are no-ops (they only exist because the SDK's
+// compileActions requires one per declared action). You could hook them for
+// local logging or metrics if you wanted to.
+const noopExecutors: Record<string, ActionExecutor> = Object.fromEntries(
+  MAFIA_ACTION_BLUEPRINTS.map((a) => [a.name, async () => undefined]),
+);
+
 async function main(): Promise<void> {
-  const personaName = process.env.PERSONA ?? "vera";
+  const personaName = process.env.PERSONA ?? "sana";
   const blueprint = getBlueprint(personaName);
 
   requireEnv("MAFIA_STUDIO_KEY");
   requireEnv("OPENROUTER_API_KEY");
-  requireEnv("DATABASE_URL");
   const seatToken = resolveSeatToken(personaName);
 
   const tag = `[${blueprint.persona.name}]`;
   console.log(`${tag} boot · blueprint ${blueprint.id} v${blueprint.version ?? 1}`);
 
-  const { agent, close: closeAgent } = await createAgentInstance({
+  let myRole: SeatRole | null = null;
+  let currentPhase = "LOBBY";
+  let round = 0;
+  // Populated once connectToTable resolves. Kept in outer scope so onFatal /
+  // shutdown handlers can close it, but referenced only when non-null (onFatal
+  // fires from an early WebSocket close BEFORE this assignment completes).
+  let conn: Awaited<ReturnType<typeof connectToTable>> | null = null;
+
+  conn = await connectToTable({
+    apiKey: process.env.MAFIA_STUDIO_KEY!,
+    seatToken,
+    endpoint: MAFIA_STUDIO_WS,
     blueprint,
-    // 0.2.0 renamed userId → instanceId. Per-seat scoping preserves memory +
-    // emotion across reconnects; a fresh id would birth a new instance.
-    instanceId: `seat-${personaName}`,
     llm: new OpenRouterClient({
       apiKey: process.env.OPENROUTER_API_KEY!,
       model: process.env.MODEL ?? "anthropic/claude-sonnet-4.6",
     }),
-  });
-
-  let myRole: SeatRole | null = null;
-  let currentPhase = "LOBBY";
-  let round = 0;
-
-  const conn = await connectToTable({
-    apiKey: process.env.MAFIA_STUDIO_KEY!,
-    seatToken,
-    endpoint: MAFIA_STUDIO_WS,
-    agent,
+    executors: noopExecutors,
     actions: [...MAFIA_ACTIONS],
 
     onGameEvent: (evt) => {
@@ -106,10 +114,9 @@ async function main(): Promise<void> {
       }
     },
 
-    onFatal: async (err) => {
+    onFatal: (err) => {
       console.error(`${tag} fatal ·`, err);
-      await conn.close().catch(() => {});
-      await closeAgent?.().catch(() => {});
+      void conn?.close().catch(() => {});
       process.exit(1);
     },
   });
@@ -120,8 +127,7 @@ async function main(): Promise<void> {
 
   const shutdown = async (why: string) => {
     console.log(`${tag} shutdown · ${why} · was ${myRole ?? "unknown"} in ${currentPhase}`);
-    await conn.close().catch(() => {});
-    await closeAgent?.().catch(() => {});
+    await conn?.close().catch(() => {});
     process.exit(0);
   };
   process.on("SIGINT", () => void shutdown("SIGINT"));

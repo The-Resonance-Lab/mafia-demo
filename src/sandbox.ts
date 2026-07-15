@@ -2,13 +2,18 @@
  * Local sandbox — plays a full game against script bots without touching a
  * live MafiaStudio table.
  *
- * PERSONA=vera npm run sandbox
+ * PERSONA=sana ROLE=town npm run sandbox
  */
 import "dotenv/config";
 import { createAgentInstance } from "emocentric/postgres";
 import { OpenRouterClient } from "emocentric/openrouter";
-import { sandboxTable } from "mafia-studio-adapter";
+import type { ActionExecutor } from "emocentric";
+import { sandboxTable, MAFIA_ACTION_BLUEPRINTS } from "mafia-studio-adapter";
 import { getBlueprint } from "./blueprints/index.js";
+
+const noopExecutors: Record<string, ActionExecutor> = Object.fromEntries(
+  MAFIA_ACTION_BLUEPRINTS.map((a) => [a.name, async () => undefined]),
+);
 
 async function main(): Promise<void> {
   for (const name of ["OPENROUTER_API_KEY", "DATABASE_URL"]) {
@@ -18,7 +23,7 @@ async function main(): Promise<void> {
     }
   }
 
-  const personaName = process.env.PERSONA ?? "vera";
+  const personaName = process.env.PERSONA ?? "sana";
   const blueprint = getBlueprint(personaName);
   const role = (process.env.ROLE ?? "town") as "town" | "mafia" | "detective";
 
@@ -29,6 +34,7 @@ async function main(): Promise<void> {
       apiKey: process.env.OPENROUTER_API_KEY!,
       model: process.env.MODEL ?? "anthropic/claude-sonnet-4.6",
     }),
+    executors: noopExecutors,
   });
 
   console.log(`[sandbox] ${blueprint.persona.name} as ${role}…`);

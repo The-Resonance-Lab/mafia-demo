@@ -33,21 +33,30 @@ if (missing.length > 0) {
 
 const children: ChildProcess[] = [];
 
-for (const p of personas) {
-  const child = spawn(process.execPath, [
-    "--import", "tsx",
-    agentEntry,
-  ], {
-    env: { ...process.env, PERSONA: p },
-    stdio: "inherit",
-  });
-  children.push(child);
-  child.on("exit", (code) => {
-    console.log(`[all] ${p} exited with ${code}`);
-  });
+/** Stagger spawn by this many ms per child. Realtime auth can race under a
+ *  4-parallel connect burst (occasional 4401 close on the slowest to arrive);
+ *  a small delay serializes the handshakes and eliminates it. */
+const SPAWN_STAGGER_MS = 750;
+
+async function spawnAll() {
+  for (const p of personas) {
+    const child = spawn(process.execPath, [
+      "--import", "tsx",
+      agentEntry,
+    ], {
+      env: { ...process.env, PERSONA: p },
+      stdio: "inherit",
+    });
+    children.push(child);
+    child.on("exit", (code) => {
+      console.log(`[all] ${p} exited with ${code}`);
+    });
+    await new Promise((r) => setTimeout(r, SPAWN_STAGGER_MS));
+  }
+  console.log(`[all] spawned ${children.length} agents · Ctrl-C to stop`);
 }
 
-console.log(`[all] spawned ${children.length} agents · Ctrl-C to stop`);
+void spawnAll();
 
 const shutdown = () => {
   console.log("[all] shutting down…");
