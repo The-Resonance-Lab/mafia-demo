@@ -1,10 +1,19 @@
 import type { AgentBlueprint } from "emocentric";
-import { vera } from "./vera.js";
-import { marcus } from "./marcus.js";
-import { sofia } from "./sofia.js";
-import { theo } from "./theo.js";
+import { sana } from "./sana.js";
+import { kai } from "./kai.js";
+import { nadya } from "./nadya.js";
+import { elie } from "./elie.js";
 
-export const BLUEPRINTS = { vera, marcus, sofia, theo } as const;
+/**
+ * Four hand-drawn personas — not archetypes. Each has a distinct backstory, a
+ * custom emotion added to (or filtered from) the SDK's default palette, and
+ * seed facts tuned for that voice.
+ *
+ * Copy any of these to a new file to author your own; the shape is the entire
+ * API surface. `emocentric`'s `AgentBlueprint` type is the single source of
+ * truth for what's valid.
+ */
+export const BLUEPRINTS = { sana, kai, nadya, elie } as const;
 export type PersonaName = keyof typeof BLUEPRINTS;
 
 export function getBlueprint(name: string): AgentBlueprint {
@@ -17,4 +26,4 @@ export function getBlueprint(name: string): AgentBlueprint {
   return bp;
 }
 
-export { vera, marcus, sofia, theo };
+export { sana, kai, nadya, elie };

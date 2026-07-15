@@ -3,19 +3,21 @@
  *
  * npm run bootstrap
  *
- * Registers the four personas (Vera / Marcus / Sofia / Theo) under an existing
- * team, creates a table with them seated, mints seat tokens, and prints an
- * `.env`-ready fragment you can paste and run with `npm run all`.
+ * If TEAM_ID + MAFIA_STUDIO_KEY are missing from .env, creates a team, writes
+ * both back. Then registers the four personas, creates a 4-seat table, mints
+ * seat tokens, and writes SEAT_TOKEN_<PERSONA> back too. After this runs,
+ * `.env` is fully filled and `npm run all` is the next step.
  *
- * Idempotent on personas — if a slug already exists it's skipped and reused.
+ * Idempotent: personas with a matching slug are reused; existing MAFIA_STUDIO_KEY
+ * + TEAM_ID are preserved.
  *
- * Needed env:
- *   MAFIA_STUDIO_URL   e.g. https://your-monitor.up.railway.app
+ * Only required env:
  *   ADMIN_PASSWORD     the organizer basic-auth password
- *   TEAM_ID            uuid of the team the personas will belong to
- *                      (create the team once at /admin, copy its id)
+ * (Everything else is either baked in via src/config.ts or minted below.)
  */
 import "dotenv/config";
+import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { resolve } from "node:path";
 import { BLUEPRINTS, type PersonaName } from "./blueprints/index.js";
 import { MAFIA_STUDIO_URL } from "./config.js";
 
@@ -30,6 +32,13 @@ interface PersonaTemperament {
 interface PersonaPublic {
   summary: string;
   temperament: PersonaTemperament[];
+}
+
+interface TeamRow {
+  id: string;
+  slug: string;
+  name: string;
+  contact_email: string;
 }
 
 interface PersonaRow {
@@ -66,10 +75,34 @@ function requireEnv(name: string): string {
 }
 
 const ADMIN_PASSWORD = requireEnv("ADMIN_PASSWORD");
-const TEAM_ID = requireEnv("TEAM_ID");
 
 const AUTH_HEADER =
   "Basic " + Buffer.from(`admin:${ADMIN_PASSWORD}`).toString("base64");
+
+const ENV_PATH = resolve(process.cwd(), ".env");
+
+/** Read the .env file, update a set of keys, write back. Preserves ordering,
+ *  comments, and unrelated keys. Appends missing keys at the end. */
+function updateEnvFile(updates: Record<string, string>): void {
+  const existing = existsSync(ENV_PATH) ? readFileSync(ENV_PATH, "utf8") : "";
+  const lines = existing.split(/\r?\n/);
+  const remaining = new Set(Object.keys(updates));
+
+  const patched = lines.map((line) => {
+    const m = line.match(/^([A-Z_][A-Z0-9_]*)=/);
+    if (!m) return line;
+    const key = m[1]!;
+    if (!(key in updates)) return line;
+    remaining.delete(key);
+    return `${key}=${updates[key]}`;
+  });
+
+  for (const key of remaining) {
+    patched.push(`${key}=${updates[key]}`);
+  }
+
+  writeFileSync(ENV_PATH, patched.join("\n"));
+}
 
 async function api<T>(
   path: string,
@@ -91,13 +124,38 @@ async function api<T>(
   return (await res.json()) as T;
 }
 
-async function ensurePersona(name: PersonaName): Promise<PersonaRow> {
+/** Ensure MAFIA_STUDIO_KEY + TEAM_ID exist. Creates a team if neither is set. */
+async function ensureTeam(): Promise<string> {
+  const existingId = process.env.TEAM_ID?.trim();
+  const existingKey = process.env.MAFIA_STUDIO_KEY?.trim();
+  if (existingId && existingKey) {
+    console.log(`  · reusing team ${existingId}`);
+    return existingId;
+  }
+
+  const slug = process.env.TEAM_SLUG?.trim() ||
+    `demo-${new Date().toISOString().slice(0, 10)}-${Math.random().toString(36).slice(2, 6)}`;
+  const name = process.env.TEAM_NAME?.trim() || "Demo Team";
+  const contact_email =
+    process.env.TEAM_EMAIL?.trim() || `demo+${slug}@example.com`;
+
+  const { team, api_key } = await api<{ team: TeamRow; api_key: string }>(
+    `/api/teams`,
+    { method: "POST", body: { name, slug, contact_email } },
+  );
+
+  updateEnvFile({ TEAM_ID: team.id, MAFIA_STUDIO_KEY: api_key });
+  console.log(`  · created team ${team.slug} (${team.id})`);
+  console.log(`  · wrote MAFIA_STUDIO_KEY + TEAM_ID back to .env`);
+  return team.id;
+}
+
+async function ensurePersona(teamId: string, name: PersonaName): Promise<PersonaRow> {
   const bp = BLUEPRINTS[name];
   const slug = bp.id;
 
-  // Fetch existing personas — reuse if slug already registered.
   const existing = await api<{ personas: PersonaRow[] }>(
-    `/api/personas?team_id=${TEAM_ID}`,
+    `/api/personas?team_id=${teamId}`,
   );
   const found = existing.personas.find((p) => p.slug === slug);
   if (found) {
@@ -115,40 +173,39 @@ async function ensurePersona(name: PersonaName): Promise<PersonaRow> {
       disposition: t.disposition,
     })),
   };
-
   const declared_actions = (bp.actions ?? []).map((a) => a.name);
 
-  const body = {
-    team_id: TEAM_ID,
-    slug,
-    display_name: bp.persona.name,
-    persona_public,
-    declared_actions,
-  };
   const { persona } = await api<{ persona: PersonaRow }>(`/api/personas`, {
     method: "POST",
-    body,
+    body: {
+      team_id: teamId,
+      slug,
+      display_name: bp.persona.name,
+      persona_public,
+      declared_actions,
+    },
   });
   console.log(`  · ${bp.persona.name} · registered (${persona.id})`);
   return persona;
 }
 
 async function createTable(personas: Record<PersonaName, PersonaRow>): Promise<TableRow> {
-  // Balanced 4-player Mafia: 1 mafia, 1 detective, 2 town. Roles assigned by
-  // position; seats get shuffled server-side so the mafia isn't always seat 0.
+  // Balanced 4-player Mafia: 1 mafia, 1 detective, 2 town. Role assignment is
+  // deliberate — Kai's rhythm-reading suits the detective's investigative bent,
+  // Nadya's bitter cartography reads well as mafia (she distrusts consensus,
+  // which is useful when hiding among town), and the two "town" seats get
+  // Sana (patient) and Elie (pattern-matching) — a compelling contrast.
   const seatOrder: Array<{ persona: PersonaName; seat_role: "mafia" | "town" | "detective" }> = [
-    { persona: "marcus", seat_role: "mafia" },
-    { persona: "theo", seat_role: "detective" },
-    { persona: "vera", seat_role: "town" },
-    { persona: "sofia", seat_role: "town" },
+    { persona: "nadya", seat_role: "mafia" },
+    { persona: "kai", seat_role: "detective" },
+    { persona: "sana", seat_role: "town" },
+    { persona: "elie", seat_role: "town" },
   ];
-
   const seats = seatOrder.map((s) => ({
     participant_type: "persona" as const,
     seat_role: s.seat_role,
     persona_id: personas[s.persona].id,
   }));
-
   const name = `demo-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-")}`;
   const { table } = await api<{ table: TableRow }>(`/api/tables`, {
     method: "POST",
@@ -164,11 +221,8 @@ async function mintTokens(
   const overview = await api<{ seats: MonitorSeat[] }>(
     `/api/tables/${tableId}/monitor`,
   );
-
   const seatByPersonaId = new Map(
-    overview.seats
-      .filter((s) => s.participant_id)
-      .map((s) => [s.participant_id!, s]),
+    overview.seats.filter((s) => s.participant_id).map((s) => [s.participant_id!, s]),
   );
 
   const tokens: Partial<Record<PersonaName, string>> = {};
@@ -186,34 +240,37 @@ async function mintTokens(
 }
 
 async function main(): Promise<void> {
-  console.log(`bootstrapping against ${MAFIA_STUDIO_URL}`);
-  console.log(`team_id ${TEAM_ID}`);
+  console.log(`bootstrapping against ${MAFIA_STUDIO_URL}\n`);
 
-  console.log(`\n[1/3] registering personas`);
+  console.log(`[1/4] team`);
+  const teamId = await ensureTeam();
+
+  console.log(`\n[2/4] personas`);
   const personas: Partial<Record<PersonaName, PersonaRow>> = {};
   for (const name of Object.keys(BLUEPRINTS) as PersonaName[]) {
-    personas[name] = await ensurePersona(name);
+    personas[name] = await ensurePersona(teamId, name);
   }
 
-  console.log(`\n[2/3] creating table`);
+  console.log(`\n[3/4] table`);
   const table = await createTable(personas as Record<PersonaName, PersonaRow>);
   console.log(`  · ${table.name} (${table.id})`);
 
-  console.log(`\n[3/3] minting seat tokens`);
-  const tokens = await mintTokens(
-    table.id,
-    personas as Record<PersonaName, PersonaRow>,
-  );
+  console.log(`\n[4/4] seat tokens`);
+  const tokens = await mintTokens(table.id, personas as Record<PersonaName, PersonaRow>);
+
+  const tokenUpdates: Record<string, string> = {};
+  for (const name of Object.keys(tokens) as PersonaName[]) {
+    tokenUpdates[`SEAT_TOKEN_${name.toUpperCase()}`] = tokens[name];
+  }
+  updateEnvFile(tokenUpdates);
 
   console.log(`\n═══════════════════════════════════════════════════════════`);
-  console.log(`✓ ready · paste this into .env, then \`npm run all\`:`);
-  console.log(`═══════════════════════════════════════════════════════════\n`);
-  console.log(`# table: ${table.name} (${table.id})`);
-  for (const name of Object.keys(BLUEPRINTS) as PersonaName[]) {
-    console.log(`SEAT_TOKEN_${name.toUpperCase()}=${tokens[name]}`);
-  }
-  console.log(`\n# open the monitor to watch it play:`);
-  console.log(`# ${MAFIA_STUDIO_URL}/monitor/tables/${table.id}`);
+  console.log(`✓ ready · .env is fully wired · run:`);
+  console.log(`      npm run all`);
+  console.log(`═══════════════════════════════════════════════════════════`);
+  console.log(`\nthen open the monitor to watch it play:`);
+  console.log(`  ${MAFIA_STUDIO_URL}/monitor/tables/${table.id}`);
+  console.log(`\nand click "Start table" in the top-left rail.`);
 }
 
 main().catch((err) => {
