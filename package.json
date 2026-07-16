@@ -13,6 +13,10 @@
     "kai": "cross-env PERSONA=kai tsx src/agent.ts",
     "nadya": "cross-env PERSONA=nadya tsx src/agent.ts",
     "elie": "cross-env PERSONA=elie tsx src/agent.ts",
+    "vera": "cross-env PERSONA=vera tsx src/agent.ts",
+    "marcus": "cross-env PERSONA=marcus tsx src/agent.ts",
+    "sofia": "cross-env PERSONA=sofia tsx src/agent.ts",
+    "theo": "cross-env PERSONA=theo tsx src/agent.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
