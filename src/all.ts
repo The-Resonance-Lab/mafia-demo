@@ -16,18 +16,20 @@ import { BLUEPRINTS, type PersonaName } from "./blueprints/index.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const agentEntry = resolve(here, "agent.ts");
-const personas = Object.keys(BLUEPRINTS) as PersonaName[];
+const allPersonas = Object.keys(BLUEPRINTS) as PersonaName[];
 
-// Fail fast if any per-persona token is missing — better than watching one
-// child crash on connect.
-const missing: string[] = [];
-for (const p of personas) {
-  const key = `SEAT_TOKEN_${p.toUpperCase()}`;
-  if (!process.env[key]) missing.push(key);
+// Only spawn personas that HAVE a seat token for this table. Everyone else is
+// skipped with a note — makes it possible to run a subset when a table only
+// seats some of the registered personas.
+const personas = allPersonas.filter(
+  (p) => !!process.env[`SEAT_TOKEN_${p.toUpperCase()}`],
+);
+const skipped = allPersonas.filter((p) => !personas.includes(p));
+for (const p of skipped) {
+  console.log(`[all] skip ${p} · no SEAT_TOKEN_${p.toUpperCase()} in .env`);
 }
-if (missing.length > 0) {
-  console.error(`missing seat tokens: ${missing.join(", ")}`);
-  console.error(`hint: run \`npm run bootstrap\` to mint them, or set them by hand`);
+if (personas.length === 0) {
+  console.error("no personas have seat tokens; run `npm run bootstrap` first");
   process.exit(1);
 }
 
